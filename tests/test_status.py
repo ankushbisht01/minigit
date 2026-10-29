@@ -1,5 +1,6 @@
 """Tests for what ``minigit status`` prints."""
 
+import minigit.color as color
 from minigit.refs import head_commit, set_head
 
 
@@ -53,3 +54,37 @@ def test_detached_head(repo, run, write):
     commit = head_commit(repo)
     set_head(repo, commit, symbolic=False)
     assert run("status").out.startswith(f"HEAD detached at {commit[:7]}")
+
+
+def test_status_colors_match_change_state(repo, run, write, monkeypatch):
+    write("staged.txt", "original\n")
+    write("deleted.txt", "original\n")
+    run("add", ".")
+    run("commit", "-m", "first")
+
+    write("staged.txt", "staged edit\n")
+    run("add", "staged.txt")
+    (repo.worktree / "deleted.txt").unlink()
+    write("untracked.txt", "new\n")
+    monkeypatch.setattr(color, "_should_color", lambda: True)
+
+    out = run("status").out
+
+    assert "On branch \033[32mmain\033[0m" in out
+    assert "\033[32mChanges to be committed:\033[0m" in out
+    assert "\t\033[32mmodified:   staged.txt\033[0m" in out
+    assert "\033[32mChanges not staged for commit:\033[0m" in out
+    assert "\t\033[31mdeleted:    deleted.txt\033[0m" in out
+    assert "\033[32mUntracked files:\033[0m" in out
+    assert "\033[31muntracked.txt\033[0m" in out
+
+
+def test_clean_status_is_green(repo, run, write, monkeypatch):
+    write("a.txt", "a\n")
+    run("add", "a.txt")
+    run("commit", "-m", "first")
+    monkeypatch.setattr(color, "_should_color", lambda: True)
+
+    out = run("status").out
+
+    assert "\033[32mnothing to commit, working tree clean\033[0m" in out
