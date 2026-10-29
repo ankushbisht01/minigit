@@ -7,6 +7,8 @@ For each file, ``add`` stores its content as a blob object and records
 import argparse
 from pathlib import Path
 
+from minigit import color
+from minigit.changes import untracked_files
 from minigit.errors import MinigitError
 from minigit.index import Index, IndexEntry
 from minigit.objects import FILE_MODE, write_object
@@ -32,7 +34,25 @@ def run(args: argparse.Namespace, repo: Repository | None) -> int:
             sha = write_object(repo, (repo.worktree / path).read_bytes(), "blob")
             index.add(IndexEntry(FILE_MODE, sha, path))
     index.save(repo)
+    _print_preview(repo, index)
     return 0
+
+
+def _print_preview(repo: Repository, index: Index) -> None:
+    """Print preview showing tracked files in green and untracked files in red."""
+    tracked = [e.path for e in index]
+    untracked = untracked_files(repo)
+    lines: list[str] = []
+    if tracked:
+        lines.append("Tracked files:")
+        lines.extend(f"\t{color.green(path)}" for path in tracked)
+    if untracked:
+        if lines:
+            lines.append("")
+        lines.append("Untracked files:")
+        lines.extend(f"\t{color.red(path)}" for path in untracked)
+    if lines:
+        print("\n".join(lines))
 
 
 def _stage_deletions(index, repo, raw):
