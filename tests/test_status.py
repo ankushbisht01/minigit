@@ -1,5 +1,6 @@
 """Tests for what ``minigit status`` prints."""
 
+import minigit.color as color
 from minigit.refs import head_commit, set_head
 
 
@@ -53,3 +54,26 @@ def test_detached_head(repo, run, write):
     commit = head_commit(repo)
     set_head(repo, commit, symbolic=False)
     assert run("status").out.startswith(f"HEAD detached at {commit[:7]}")
+
+
+def test_status_uses_color_when_terminal(repo, run, write, monkeypatch):
+    # Pretend stdout is a terminal so the color helpers emit ANSI codes.
+    monkeypatch.setattr(color, "_should_color", lambda: True)
+
+    write("a.txt", "a\n")
+    run("add", "a.txt")
+    write("a.txt", "changed\n")
+    write("loose.txt", "x\n")
+
+    out = run("status").out
+    assert "\033[1mChanges to be committed:\033[0m" in out
+    assert "\033[32m\tnew file:   a.txt\033[0m" in out
+    assert "\033[31m\tmodified:   a.txt\033[0m" in out
+    assert "\033[31m\tloose.txt\033[0m" in out
+
+
+def test_status_has_no_color_codes_by_default(repo, run, write):
+    write("a.txt", "a\n")
+    run("add", "a.txt")
+    out = run("status").out
+    assert "\033[" not in out
