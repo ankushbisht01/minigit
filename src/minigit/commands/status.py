@@ -3,6 +3,7 @@
 The comparing is done by ``minigit.changes``; this file only prints.
 """
 
+from minigit import color
 from minigit.changes import staged_changes, unstaged_changes, untracked_files
 from minigit.refs import current_branch, head_commit
 
@@ -47,9 +48,9 @@ def run(args, repo):
     lines += _section("Changes to be committed:", staged)
     lines += _section("Changes not staged for commit:", unstaged)
     if untracked:
-        lines += ["Untracked files:"] + [f"\t{path}" for path in untracked] + [""]
+        lines += ["Untracked files:"] + [color.red(f"\t{path}") for path in untracked] + [""]
     if not (staged or unstaged or untracked):
-        lines.append("nothing to commit, working tree clean")
+        lines.append(color.green("nothing to commit, working tree clean"))
 
     print("\n".join(lines).rstrip("\n"))
     return 0
