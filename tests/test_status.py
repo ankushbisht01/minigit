@@ -53,3 +53,18 @@ def test_detached_head(repo, run, write):
     commit = head_commit(repo)
     set_head(repo, commit, symbolic=False)
     assert run("status").out.startswith(f"HEAD detached at {commit[:7]}")
+
+
+def test_status_colors(repo, run, write, monkeypatch):
+    import minigit.color as color
+
+    monkeypatch.setattr(color, "_should_color", lambda: True)
+
+    write("staged.txt", "staged\n")
+    write("untracked.txt", "untracked\n")
+    run("add", "staged.txt")
+
+    out = run("status").out
+    # Staged should be green (\033[32m), untracked should be red (\033[31m)
+    assert "\033[32m\tnew file:   staged.txt\033[0m" in out
+    assert "\033[31m\tuntracked.txt\033[0m" in out
