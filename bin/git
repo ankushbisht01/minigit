@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+"""Git wrapper that updates file-status.md whenever `git status` runs."""
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+STATUS_FILENAME = "file-status.md"
+
+
+def find_real_git() -> str:
+    wrapper_path = Path(__file__).resolve()
+    for path_candidate in ["/usr/bin/git", "/usr/local/bin/git", "/opt/homebrew/bin/git"]:
+        candidate = Path(path_candidate)
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            if candidate.resolve() != wrapper_path:
+                return str(candidate)
+
+    for directory in os.environ.get("PATH", "").split(os.pathsep):
+        candidate = Path(directory) / "git"
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            if candidate.resolve() != wrapper_path:
+                return str(candidate)
+    return "/usr/bin/git"
+
+
+def _format_entry(path: str, color: str) -> str:
+    if "`" in path:
+        code_span = f"`` {path} ``"
+    else:
+        code_span = f"`{path}`"
+    return f'- <span style="color: {color};">{code_span}</span>'
+
+
+def update_status_file(real_git: str) -> None:
+    try:
+        root_out = subprocess.check_output(
+            [real_git, "rev-parse", "--show-toplevel"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+        if not root_out:
+            return
+        repo_root = Path(root_out).resolve()
+
+        # Tracked files (must exist on disk)
+        tracked_raw = subprocess.check_output(
+            [real_git, "ls-files", "-z"],
+            cwd=repo_root,
+            stderr=subprocess.DEVNULL,
+        )
+        tracked_all = [p for p in tracked_raw.decode("utf-8", errors="replace").split("\0") if p]
+        tracked = [
+            p for p in sorted(set(tracked_all))
+            if p != STATUS_FILENAME and (repo_root / p).is_file()
+        ]
+
+        # Untracked files (excluding ignored files, must exist on disk)
+        untracked_raw = subprocess.check_output(
+            [real_git, "ls-files", "--others", "--exclude-standard", "-z"],
+            cwd=repo_root,
+            stderr=subprocess.DEVNULL,
+        )
+        untracked_all = [
+            p for p in untracked_raw.decode("utf-8", errors="replace").split("\0") if p
+        ]
+        untracked = [
+            p for p in sorted(set(untracked_all))
+            if p != STATUS_FILENAME and (repo_root / p).is_file()
+        ]
+
+        # Build markdown content
+        lines = ["**🔴 Untracked Files**"]
+        for p in untracked:
+            lines.append(_format_entry(p, "red"))
+        lines.append("")
+        lines.append("**🟢 Tracked Files**")
+        for p in tracked:
+            lines.append(_format_entry(p, "green"))
+        content = "\n".join(lines) + "\n"
+
+        target = repo_root / STATUS_FILENAME
+        if target.exists():
+            try:
+                if target.read_text(encoding="utf-8") == content:
+                    return
+            except Exception:
+                pass
+        target.write_text(content, encoding="utf-8")
+    except Exception:
+        # Fallback to minigit logic if available
+        try:
+            cwd = Path.cwd()
+            for p in [cwd, *cwd.parents]:
+                src_path = p / "src"
+                if (src_path / "minigit").is_dir():
+                    if str(src_path) not in sys.path:
+                        sys.path.insert(0, str(src_path))
+                    from minigit.status_indicator import update_file_status
+                    update_file_status()
+                    break
+        except Exception:
+            pass
+
+
+def filter_git_status_output(text: str) -> str:
+    """Filter file-status.md out of git status output to avoid interfering with normal output."""
+    lines = text.split("\n")
+    new_lines = []
+    has_other_untracked = False
+    has_staged_or_unstaged = False
+
+    for line in lines:
+        if "Changes to be committed:" in line or "Changes not staged for commit:" in line:
+            has_staged_or_unstaged = True
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith("Untracked files:"):
+            header = [line]
+            i += 1
+            if i < len(lines) and 'use "git add' in lines[i]:
+                header.append(lines[i])
+                i += 1
+            files = []
+            while i < len(lines) and lines[i].startswith("\t"):
+                if lines[i].strip() != STATUS_FILENAME:
+                    files.append(lines[i])
+                    has_other_untracked = True
+                i += 1
+            if files:
+                new_lines.extend(header)
+                new_lines.extend(files)
+            continue
+        elif "nothing added to commit but untracked files present" in line:
+            if has_other_untracked:
+                new_lines.append(line)
+            elif not has_staged_or_unstaged:
+                new_lines.append("nothing to commit, working tree clean")
+            i += 1
+            continue
+        elif line.startswith("?? ") or line.startswith("? "):
+            if line[3:].strip() == STATUS_FILENAME:
+                i += 1
+                continue
+        new_lines.append(line)
+        i += 1
+    return "\n".join(new_lines)
+
+
+def main() -> int:
+    real_git = find_real_git()
+    args = sys.argv[1:]
+
+    is_status = False
+    for arg in args:
+        if arg == "status":
+            is_status = True
+            break
+        elif not arg.startswith("-"):
+            break
+
+    if is_status:
+        # Run real git status and filter output
+        proc = subprocess.run([real_git, *args], capture_output=True, text=True)
+        if proc.stdout:
+            sys.stdout.write(filter_git_status_output(proc.stdout))
+        if proc.stderr:
+            sys.stderr.write(proc.stderr)
+        if proc.returncode == 0:
+            update_status_file(real_git)
+        return proc.returncode
+    else:
+        # For all other commands, pass through directly
+        proc = subprocess.run([real_git, *args])
+        return proc.returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main())

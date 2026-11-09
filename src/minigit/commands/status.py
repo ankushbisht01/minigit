@@ -5,6 +5,7 @@ The comparing is done by ``minigit.changes``; this file only prints.
 
 from minigit.changes import staged_changes, unstaged_changes, untracked_files
 from minigit.refs import current_branch, head_commit
+from minigit.status_indicator import update_file_status
 
 NAME = "status"
 HELP = "Show staged, unstaged and untracked files"
@@ -39,6 +40,7 @@ def _section(title: str, changes: dict[str, str]) -> list[str]:
 
 
 def run(args, repo):
+    update_file_status(repo)
     staged = staged_changes(repo)
     unstaged = unstaged_changes(repo)
     untracked = untracked_files(repo)
